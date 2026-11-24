@@ -9,6 +9,7 @@ import connectDB from "./utils/db.js";
 import errorHandler from "./middlewares/errorHandler.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import bookingRoutes from "./routes/bookingRoutes.js";
 
 
 
@@ -30,6 +31,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/futsals", futsalRoutes);
 app.use("/api/courts", courtRoutes);
 app.use("/api/timeslots", timeslotRoutes);
+app.use("/api/bookings", bookingRoutes);
 
 const PORT = config.port;
 

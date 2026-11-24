@@ -52,4 +52,19 @@ const isAdminOrVendor = (req, res, next) => {
         next(error);
     }       
 }
-export { isAdmin, isVendor, isAdminOrVendor };
+
+const isCustomer = (req, res, next) => {
+    try {
+        if (!req.user) {
+            return next(createHttpError(401, "User not authenticated!"));
+        }
+        if (req.user.role !== "user") {
+            return next(createHttpError(403, "Access denied. Customers only."));
+        }
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
+
+export { isAdmin, isVendor, isAdminOrVendor, isCustomer};

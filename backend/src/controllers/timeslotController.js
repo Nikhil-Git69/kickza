@@ -3,7 +3,13 @@
     import TimeSlot from "../models/TimeSlot.js";
     import Court from "../models/Court.js";
     
-    
+    import Booking from "../models/Booking.js";
+import {
+    isValidDateString, dayOfWeek, nepalToday, addDays,
+    MAX_ADVANCE_DAYS, BOOKING_CUTOFF_MINUTES, slotStartAsDate,
+} from "../utils/dateUtils.js";
+
+
     const TIME_FORMAT = /^([01]\d|2[0-3]):[0-5]\d$/;
 
     const createTimeSlot = async (req, res, next) => {
@@ -81,29 +87,78 @@
     }
 
 
-    const getTimeSlotsByCourtId = async (req, res, next) => {
-        try{
-            const {courtId} = req.params;
+   const getTimeSlotsByCourtId = async (req, res, next) => {
+    try {
+        const { courtId } = req.params;
+        const { date } = req.query;
 
-            if (!mongoose.Types.ObjectId.isValid(courtId)) {
-                return next(createHttpError(400, "Invalid courtId!"));
-            }
-
-            const court = await Court.findOne({ _id: courtId, isActive: true }).populate('futsal');
-
-            if (!court || !court.futsal || !court.futsal.isActive) {
-                return next(createHttpError(404, "Court not found!"));
-            }
-
-            const timeSlots = await TimeSlot.find({ court: courtId, isActive: true }).sort({ startTime: 1 })
-
-            res.status(200).json({ success: true, data: timeSlots });   
+        if (!mongoose.Types.ObjectId.isValid(courtId)) {
+            return next(createHttpError(400, "Invalid courtId!"));
         }
-        catch(error){
-            next(error);
+
+        const court = await Court.findOne({ _id: courtId, isActive: true }).populate("futsal");
+        if (!court || !court.futsal || !court.futsal.isActive) {
+            return next(createHttpError(404, "Court not found!"));
         }
+
+        // No date: plain template list (vendor management view)
+        if (date === undefined) {
+            const timeSlots = await TimeSlot.find({ court: courtId, isActive: true }).sort({ startTime: 1 });
+            return res.status(200).json({ success: true, data: timeSlots });
+        }
+
+        // With a date: compute status for that day
+        if (typeof date !== "string" || !isValidDateString(date)) {
+            return next(createHttpError(400, "date must be a valid YYYY-MM-DD!"));
+        }
+        if (date < nepalToday() || date > addDays(nepalToday(), MAX_ADVANCE_DAYS)) {
+            return next(createHttpError(400, "Date is outside the allowed booking window!"));
+        }
+
+        await Booking.updateMany(
+            { status: "pending", expiresAt: { $lt: new Date() } },
+            { status: "expired" }
+        );
+
+        const slots = await TimeSlot.find({
+            court: courtId,
+            isActive: true,
+            days: dayOfWeek(date),
+        }).sort({ startTime: 1 });
+
+        const bookings = await Booking.find({
+            court: courtId,
+            date,
+            status: { $in: ["pending", "confirmed"] },
+        }).select("status slots.slot");
+
+        const statusBySlot = new Map();
+        for (const b of bookings) {
+            for (const s of b.slots) {
+                const id = s.slot.toString();
+                if (b.status === "confirmed" || !statusBySlot.has(id)) {
+                    statusBySlot.set(id, b.status);
+                }
+            }
+        }
+
+    const cutoff = Date.now() + BOOKING_CUTOFF_MINUTES * 60 * 1000;
+        
+
+    const data = slots.map((s) => {
+        const held = statusBySlot.get(s._id.toString());
+        let status = "available";
+        if (held === "confirmed") status = "booked";
+        else if (held === "pending") status = "pending";
+        else if (slotStartAsDate(date, s.startTime).getTime() < cutoff) status = "expired";
+        return { ...s.toObject(), status };
+    }); 
+
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        next(error);
     }
-
+};
 
     const deleteTimeSlot = async (req, res, next) => {
         try{
